@@ -1,0 +1,31 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: exposure-service
+  datasource:
+    url: jdbc:h2:file:./data/exposure-db;AUTO_SERVER=TRUE
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: exposure-service
+      auto-offset-reset: earliest      # a new/rebuilt read model replays history
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ErrorHandlingDeserializer stops one malformed message from blocking the partition
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.value.default.type: com.example.exposure.ClaimEvent
+        spring.json.use.type.headers: false
+        spring.json.trusted.packages: com.example.exposure
+
+app:
+  kafka:
+    claims-topic: claims.events
