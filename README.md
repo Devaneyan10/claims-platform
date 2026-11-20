@@ -24,10 +24,27 @@ mvn -pl exposure-service spring-boot:run          # terminal 2  -> :8081
 ./scripts/demo.sh                                 # terminal 3  -> walks a claim end to end (needs curl + jq)
 ```
 
+Frontend (Angular 18, needs Node 20+):
+
+```bash
+cd frontend
+npm install
+npm start                                         # http://localhost:4200
+```
+
+Use the "Signed in as" dropdown (alice/carol = claimants, bob/dave = officers, mgr = manager).
+
 Swagger UI: http://localhost:8080/swagger-ui.html and http://localhost:8081/swagger-ui.html
 
 The claims API still works if Kafka is down (events are logged as failed); exposure just
 won't update until events flow again.
+
+## Frontend
+Small Angular app: claimants submit and track claims and answer information requests;
+officers see the queue, assign, review, request info, decide and settle, plus their workload;
+managers see outstanding liability by market, officer workload and all claims. It calls both
+services directly (CORS is enabled for localhost:4200). Not built: real login, pagination,
+file uploads, component tests.
 
 ## Identity (stand-in for real auth)
 

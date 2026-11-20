@@ -1,41 +1,82 @@
 # AI working journal
 
-Running log of what I asked the AI, what I accepted, challenged or overrode, and why.
-(Draft entries from the working session. Edit so they reflect your own reasoning.)
+A running log of what I asked the AI (Claude), what I accepted, what I challenged or had to fix,
+and why. Written from the actual working session, 20 Nov 2026.
 
-## 1. Choosing the stack
-- **Asked:** which backend stack is easier, C#/.NET or Spring Boot?
-- **Result:** AI recommended Spring Boot (H2, spring-kafka, springdoc need little setup) but said
-  to pick whichever I can explain line by line.
+## Summary
+- AI wrote nearly all of the code. I ran it, tested it, and fixed the environment problems.
+- I mostly accepted the AI's design. The places where I had to verify, correct or work around
+  its output are listed below, along with what is still unverified.
+
+---
+
+## 1. Understanding the brief
+- **Asked:** whether the assessment could be done with AI, and how.
+- **AI said:** yes, since the brief expects AI-driven code generation, but I must be able to
+  defend every line. It proposed a plan before writing code.
+- **Accepted:** backend first, frontend after, and a README plus a decisions document.
+
+## 2. Architecture
+- **AI proposed:** two services, `claims-service` (system of record, REST) and `exposure-service`
+  (Kafka consumer, liability read model); REST for things a user waits on, Kafka for events that
+  already happened; a claim state machine; manager exposure summary.
+- **Accepted:** all of it. Reasoning I can give: the claim workflow needs strong consistency,
+  while exposure reporting is read-heavy and can be eventually consistent, so they scale and
+  fail separately. Splitting further would add network hops with no benefit at this size.
+- **Assumptions the AI made that I should be able to explain** (listed in `docs/DECISIONS.md`):
+  - the six markets (SG, MY, HK, TH, ID, VN), since the brief does not name them;
+  - exposure = estimate while open, approved amount once approved, zero when rejected/settled;
+  - identity via `X-User-Id` / `X-User-Role` headers instead of real login.
+
+## 3. Choosing the stack
+- **Asked:** which backend stack is easier and good, C#/.NET or Java/Spring Boot?
+- **AI said:** Spring Boot, because H2, spring-kafka and springdoc need little setup, and
+  `.NET` is also fine; pick whichever I can explain line by line.
 - **Decision:** Spring Boot.
-- **My notes:** _why this suits me:_
 
-## 2. Architecture proposal
-- **Asked:** to decompose the brief.
-- **Proposed:** 2 services (claims, exposure), REST for user actions, Kafka for events, a
-  state machine for the lifecycle, a manager exposure summary.
-- **Accepted:** the 2-service split and REST/Kafka division.
-- **My notes:** _anything I changed or would challenge:_
+## 4. Code generation
+- AI generated the domain model, services, REST API, Kafka publisher/consumer, tests,
+  docker-compose, and the Angular frontend.
+- **Design choices in the generated code I need to be able to explain:**
+  - All legal status transitions live in one enum (`ClaimStatus`) and are enforced by the
+    `Claim` class, so the rules are in one place and easy to unit test.
+  - JPA `@Version` (optimistic locking) stops two officers picking up the same claim; the
+    `revision` field on events lets the consumer ignore duplicates and old events.
+  - Events are sent after the database commit, and failures are logged, not thrown, so a
+    Kafka outage does not break the API.
+  - Authorization is checked in the service layer, not only in controllers.
 
-## 3. Domain and API generation
-- **Accepted:** state machine in a single enum, aggregate methods that enforce transitions,
-  audit table, DTOs instead of exposing entities.
-- **Challenged / to verify myself:** whether Claim `revision` or JPA `@Version` should be used
-  on events. Kept both: `@Version` is for locking, `revision` is the business sequence on events.
+## 5. Problems and how they were handled
+- **AI mistake, caught in the session:** a shell command did not expand `{domain,api,...}`, so
+  the first Java files landed in the wrong folder and their packages did not match. The AI
+  noticed when inspecting the file tree and fixed it in a separate commit.
+- **Limits of AI verification:** the AI's sandbox had no Maven. It only compiled and ran the
+  plain-Java domain rules and the exposure calculation (20 checks passed). It could not run the
+  Spring, JPA or Kafka wiring, and said so.
+- **My environment problems (solved while running the project):**
+  - Docker Desktop install failed until WSL / Virtual Machine Platform was enabled;
+  - I had Java 25 but the project targets Java 21, so I installed 21 alongside it;
+  - Maven was not installed or on PATH;
+  - the zip extracted into a folder inside a folder, so Maven could not find `pom.xml`.
+- **Testing I did myself:**
+  - `mvn test`: 13 tests passed (7 claims, 6 exposure);
+  - started Kafka and both services, then used Swagger to submit, assign, review, approve and
+    settle a claim, and checked the exposure service updated at each step;
+  - submitting an amount of 0 returned a 400 with a clear message, which confirmed validation;
+  - tested the Angular app in the browser as claimant, officer and manager, including the
+    information-request loop (officer asks, claimant answers, claim returns to review).
 
-## 4. Kafka publishing
-- **AI approach:** publish in an `AFTER_COMMIT` listener.
-- **Known weakness (documented):** dual-write problem; outbox pattern is the proper fix.
-- **Decision:** accept for the sprint and document honestly in DECISIONS.md.
-- **My notes:** _would I add the outbox if I had more time? how?_
+## 6. What I did not do, and known weaknesses
+- **Dual write:** the database commit and the Kafka send are not atomic. A crash between them
+  loses an event. The fix is a transactional outbox, which I chose not to build in the time.
+- **Auth is a header stub**, not a real identity provider.
+- **Tests:** no integration tests with a real Kafka and no frontend tests.
+- **`scripts/demo.sh`** was written but never run by me or the AI, so it is untested.
+- **Workload** is computed in memory, which is fine at this scale but not at real volume.
+- No notifications service, file uploads, or pagination.
 
-## 5. Bug caught during the session
-- A shell `mkdir -p {a,b,c}` did not brace-expand, so the first domain files landed in the
-  wrong directory and packages did not match. Caught by inspecting the tree, fixed in a
-  follow-up commit. Lesson: verify generated output instead of trusting it.
-
-## 6. Verification limits
-- The sandbox had no Maven, so only the pure-Java domain rules and exposure calculator were
-  compiled and run (with stub annotations). The Spring/JPA/Kafka wiring was **not** executed
-  by the AI and must be run locally (`mvn test`, then run both services).
-- **My notes:** _errors found when I first ran it and how I fixed them:_
+## 7. Things I would change next
+1. Add the outbox pattern so events cannot be lost.
+2. Replace the header stub with real authentication (JWT/OIDC), keeping the service-layer checks.
+3. Add Testcontainers integration tests for the Kafka flow, and component tests for the UI.
+4. Move workload reporting into SQL aggregates or its own read model.
